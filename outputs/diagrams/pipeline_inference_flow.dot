@@ -1,0 +1,72 @@
+digraph PipelineInferenceFlow {
+    rankdir=TB;
+    node [shape=box, style="filled,rounded", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    Start [shape=oval, label="Start Video Inference Engine", fillcolor="#C8E6C9"];
+    Init [label="1. Stream Initialization\nOpenCV VideoCapture (CAP_MSMF)\nQuery: W=1530, H=1530, FPS=35.0\nInitialize VideoWriter (mp4v)\nInitialize CSV Writer (10 columns)", fillcolor="#E1F5FE"];
+    ReadFrame [label="cap.read()", fillcolor="#E1F5FE"];
+    CheckOk [shape=diamond, label="ok == True?", fillcolor="#FFF9C4"];
+    CheckDup [shape=diamond, label="np.array_equal\n(frame, prev_frame)?", fillcolor="#FFF9C4"];
+    SkipDup [label="Skip Duplicate Frame\n(skipped_duplicates += 1)", fillcolor="#FFCDD2"];
+    UpdateCount [label="processed_count += 1\ntimestamp = (i - 1) / 35.0", fillcolor="#E1F5FE"];
+
+    Threshold [label="Extract Contours\nimg_to_mask (cached)\nthreshold_core (fixed 115)\nfind_contours (RETR_EXTERNAL)", fillcolor="#E8F5E9"];
+    ClassifyContours [label="FlyCount Decision Tree\nClassify Contours -> neither, one, both", fillcolor="#FFF9C4"];
+    StateBranch [shape=diamond, label="Tracking State?", fillcolor="#FFF9C4"];
+
+    // States
+    subgraph cluster_sep {
+        label="State: TWO_FLIES_SEPARATED (len(one) == 2)";
+        style=dashed; color="#388E3C";
+        SexID [label="Sex Identification (clf_id)\n[A1, A2, R1, R2] -> Male & Female", fillcolor="#DCEDC8"];
+        Orient [label="Heading Orientation\nclf_orient_male & clf_orient_female\nOutput: [0, 360) deg", fillcolor="#DCEDC8"];
+        Wings [label="Male Wing Angles\nclf_wing (Bilateral Reflection)\nOutput: Left & Right deg", fillcolor="#DCEDC8"];
+        RenderSep [label="Render Full Visual HUD:\nCyan Male, Magenta Female, Yellow Wings\nFrame latency, counters, timestamps", fillcolor="#C8E6C9"];
+        CSVSep [label="CSV Row:\n[frame, time, 2, mx, my, fx, fy, m_ang, f_ang, lw, rw, status]", fillcolor="#C8E6C9"];
+
+        SexID -> Orient -> Wings -> RenderSep -> CSVSep;
+    }
+
+    subgraph cluster_ovr {
+        label="State: OVERLAPPING_FLIES (len(both) >= 1)";
+        style=dashed; color="#FFA000";
+        RenderOvr [label="Render Amber Contour Boundary\nDraw 'CONTACT / OVERLAP' Label", fillcolor="#FFE0B2"];
+        CSVOvr [label="CSV Row:\nAngles logged as blank / null\n(Prevents Data Fabrication)", fillcolor="#FFE0B2"];
+
+        RenderOvr -> CSVOvr;
+    }
+
+    subgraph cluster_fallback {
+        label="Fallback States (n_one < 2 and n_both == 0)";
+        style=dashed; color="#757575";
+        RenderFall [label="Render Partial HUD / No Flies Detected", fillcolor="#EEEEEE"];
+        CSVFall [label="CSV Row with Null Coordinates", fillcolor="#EEEEEE"];
+
+        RenderFall -> CSVFall;
+    }
+
+    WriteOutput [label="Write Frame to VideoWriter\nFlush CSV row to disk", fillcolor="#E1F5FE"];
+    Release [label="Cleanup & Resource Release\ncap.release()\nwriter.release()\ncsv_file.close()\nCompute Benchmark FPS & Latency", fillcolor="#B3E5FC"];
+    End [shape=oval, label="Inference Complete (100% 1:1 Sync)", fillcolor="#C8E6C9"];
+
+    Start -> Init -> ReadFrame -> CheckOk;
+    CheckOk -> Release [label="False (EOF)"];
+    CheckOk -> CheckDup [label="True"];
+    CheckDup -> SkipDup [label="True"];
+    SkipDup -> ReadFrame;
+    CheckDup -> UpdateCount [label="False"];
+
+    UpdateCount -> Threshold -> ClassifyContours -> StateBranch;
+    StateBranch -> SexID [label="n_one == 2"];
+    StateBranch -> RenderOvr [label="n_both >= 1"];
+    StateBranch -> RenderFall [label="other"];
+
+    CSVSep -> WriteOutput;
+    CSVOvr -> WriteOutput;
+    CSVFall -> WriteOutput;
+
+    WriteOutput -> ReadFrame;
+    Release -> End;
+}
+

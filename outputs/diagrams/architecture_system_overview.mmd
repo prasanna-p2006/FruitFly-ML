@@ -1,0 +1,52 @@
+flowchart TD
+    subgraph INPUT ["1. Video Ingestion & Stabilization"]
+        V[Raw MP4 Video: test1-test5.mp4] --> CAP[OpenCV VideoCapture: MSMF Backend]
+        CAP --> DUP[Duplicate Frame Filter: np.array_equal]
+        DUP --> FRAME[Validated Video Frame: 1530x1530 @ 35 FPS]
+    end
+
+    subgraph PREPROC ["2. Image Preprocessing & Segmentation"]
+        FRAME --> MASK[Circular Arena Mask: img_to_mask]
+        FRAME --> GRAY[Grayscale Extraction: frame[:,:,0]]
+        GRAY & MASK --> T_CORE[Adaptive Core Threshold: threshold_core]
+        GRAY & MASK --> T_WING[Adaptive Wing Threshold: threshold_wings]
+        T_CORE --> CONTOURS[Contour Extraction: cv2.findContours]
+    end
+
+    subgraph DETECT ["3. Fly Detection & State Dispatch"]
+        CONTOURS --> DT[Decision Tree FlyCount: clf_is_fly]
+        DT --> STATE{Classification State}
+        STATE -->|neither| S_NONE[Noise / Chamber Artifact]
+        STATE -->|both| S_OVERLAP[Contact / Overlapping Pair]
+        STATE -->|two one-fly contours| S_SEP[Two Separated Flies]
+    end
+
+    subgraph INFERENCE ["4. Classical ML Inference Pipeline"]
+        S_SEP --> CROPS[Centroid & Image Patch Cropping: crop_to_contour]
+        CROPS --> FEAT_ID[Area & Aspect Ratio Moments]
+        FEAT_ID --> M_ID[Sex Identification: clf_id]
+        M_ID -->|Sorted Pair| MALE_FLY[Male Fly Entity]
+        M_ID -->|Sorted Pair| FEM_FLY[Female Fly Entity]
+
+        MALE_FLY --> M_MOMENTS[Central Moments Alignment: [-pi/2, +pi/2]]
+        FEM_FLY --> F_MOMENTS[Central Moments Alignment: [-pi/2, +pi/2]]
+        
+        M_MOMENTS --> M_HOG[Male HOG Descriptor: 3,780 Features]
+        F_MOMENTS --> F_HOG[Female HOG Descriptor: 3,780 Features]
+        
+        M_HOG --> M_PCA[PCA 15-Components] --> M_ORIENT[Male Orientation: clf_orient_male]
+        F_HOG --> F_PCA[PCA 15-Components] --> F_ORIENT[Female Orientation: clf_orient_female]
+
+        MALE_FLY --> W_CROP[Thorax-Centered Patch: 400x400]
+        W_CROP --> W_MIRROR[Bilateral Symmetry Reflection]
+        W_MIRROR --> W_HOG[Wing HOG Descriptor: 3,564 Features]
+        W_HOG --> W_PCA[PCA 40-Components] --> W_REG[Wing Angle Regression: clf_wing]
+    end
+
+    subgraph OUTPUT ["5. Visualization & Telemetry Logging"]
+        M_ORIENT & F_ORIENT & W_REG & S_OVERLAP --> HUD[Visual HUD Overlay Rendering]
+        HUD --> V_OUT[Annotated MP4: 1530x1530 @ 35 FPS]
+        M_ORIENT & F_ORIENT & W_REG & S_OVERLAP --> CSV_LOG[10-Column Trajectory CSV Logger]
+        CSV_LOG --> C_OUT[Synchronized Trajectory CSV]
+    end
+

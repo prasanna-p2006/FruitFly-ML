@@ -1,0 +1,78 @@
+digraph MLModelsWorkflow {
+    rankdir=TB;
+    compound=true;
+    node [shape=box, style="filled,rounded", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    subgraph cluster_m1 {
+        label="Model 1: Fly Counting (Decision Tree: clf_is_fly.joblib)";
+        style=dashed; color="#0288D1"; fillcolor="#F0F8FF";
+        M1_Contour [label="Contour Boundary (C)", fillcolor="#E1F5FE"];
+        M1_Area [label="Area Extraction:\nA = cv2.contourArea(C)", fillcolor="#E1F5FE"];
+        M1_Node1 [shape=diamond, label="Area <= 1413.5 px?", fillcolor="#FFF9C4"];
+        M1_Node2 [shape=diamond, label="Area <= 10131.0 px?", fillcolor="#FFF9C4"];
+        M1_C0 [label="Class 0: 'neither'\n(Debris / Chamber Artifact)", fillcolor="#FFCDD2"];
+        M1_C1 [label="Class 1: 'one'\n(Individual Fly)", fillcolor="#C8E6C9"];
+        M1_C2 [label="Class 2: 'both'\n(Merged / Touching Pair)", fillcolor="#FFE0B2"];
+
+        M1_Contour -> M1_Area -> M1_Node1;
+        M1_Node1 -> M1_C0 [label="True"];
+        M1_Node1 -> M1_Node2 [label="False"];
+        M1_Node2 -> M1_C1 [label="True"];
+        M1_Node2 -> M1_C2 [label="False"];
+    }
+
+    subgraph cluster_m2 {
+        label="Model 2: Sex Identification (StandardScaler + Logistic Regression: clf_id.joblib)";
+        style=dashed; color="#388E3C"; fillcolor="#F1F8E9";
+        M2_Inputs [label="Contour Pair (c1, c2)", fillcolor="#DCEDC8"];
+        M2_Moments [label="Image Moments:\nArea = m00\nAxes = f(mu20, mu02, mu11)\nAspect Ratio = Major / Minor", fillcolor="#DCEDC8"];
+        M2_Vector [label="4D Feature Vector:\nX = [Area_1, Area_2, Aspect_1, Aspect_2]", fillcolor="#DCEDC8"];
+        M2_Scale [label="StandardScaler:\nz = (X - mu) / sigma", fillcolor="#FFF9C4"];
+        M2_LogReg [label="Logistic Regression:\nsigma(w^T z + b)", fillcolor="#FFF9C4"];
+        M2_Out [label="Binary Classification:\ny=0 -> [Male=c1, Female=c2]\ny=1 -> [Female=c1, Male=c2]", fillcolor="#C8E6C9"];
+
+        M2_Inputs -> M2_Moments -> M2_Vector -> M2_Scale -> M2_LogReg -> M2_Out;
+    }
+
+    subgraph cluster_m3 {
+        label="Model 3: 360-Degree Heading Orientation (HOG + PCA-15 + Logistic Regression)";
+        style=dashed; color="#7B1FA2"; fillcolor="#F3E5F5";
+        M3_Patch [label="Centered Fly Patch", fillcolor="#E1BEE7"];
+        M3_Moments [label="Axis Estimation via Central Moments:\ntheta = -0.5 * arctan2(2*mu11, mu20 - mu02)\n(Resolves to [-90, +90] deg)", fillcolor="#E1BEE7"];
+        M3_Crop [label="Crop & Downsample:\nWindow 192x160 -> Downsample x2 -> 96x80", fillcolor="#E1BEE7"];
+        M3_HOG [label="HOG Feature Descriptor:\nCell 8x8, Block 16x16, 9 Bins -> 3,780 Features", fillcolor="#FFF9C4"];
+        M3_PCA [label="PCA Dimensionality Reduction:\n3,780 D -> 15 Components (> 60% Variance)", fillcolor="#FFF9C4"];
+        M3_ModelM [label="clf_orient_male.joblib\n(Logistic Regression)", fillcolor="#B3E5FC"];
+        M3_ModelF [label="clf_orient_female.joblib\n(Logistic Regression)", fillcolor="#F8BBD0"];
+        M3_OutM [label="Male Heading: [0, 360) deg", fillcolor="#B3E5FC"];
+        M3_OutF [label="Female Heading: [0, 360) deg", fillcolor="#F8BBD0"];
+
+        M3_Patch -> M3_Moments -> M3_Crop -> M3_HOG -> M3_PCA;
+        M3_PCA -> M3_ModelM [label="Male"];
+        M3_PCA -> M3_ModelF [label="Female"];
+        M3_ModelM -> M3_OutM;
+        M3_ModelF -> M3_OutF;
+    }
+
+    subgraph cluster_m4 {
+        label="Model 4: Male Wing-Angle Regression (Bilateral Symmetry + HOG + PCA-40 + OLS)";
+        style=dashed; color="#E65100"; fillcolor="#FFF3E0";
+        M4_Patch [label="Male Body Patch (400x400)", fillcolor="#FFE0B2"];
+        M4_Align [label="Rotate Vertically along Body Heading", fillcolor="#FFE0B2"];
+        M4_Left [label="Left Wing Region", fillcolor="#FFE0B2"];
+        M4_Right [label="Right Wing Region\n(Reflected Horizontally for Bilateral Invariance)", fillcolor="#FFE0B2"];
+        M4_HOG [label="HOG Descriptor (96x80):\n3,564 Features", fillcolor="#FFF9C4"];
+        M4_PCA [label="PCA Dimensionality Reduction:\n3,564 D -> 40 Components (> 75% Variance)", fillcolor="#FFF9C4"];
+        M4_OLS [label="Linear Regression (OLS):\ntheta = w^T * z_pca + b", fillcolor="#FFF9C4"];
+        M4_Out [label="Continuous Wing Display Angles:\ntheta_L, theta_R in [0 deg, 90 deg)", fillcolor="#C8E6C9"];
+
+        M4_Patch -> M4_Align;
+        M4_Align -> M4_Left;
+        M4_Align -> M4_Right;
+        M4_Left -> M4_HOG;
+        M4_Right -> M4_HOG;
+        M4_HOG -> M4_PCA -> M4_OLS -> M4_Out;
+    }
+}
+

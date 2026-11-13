@@ -1,0 +1,88 @@
+digraph DatasetTrainingWorkflow {
+    rankdir=TB;
+    node [shape=box, style="filled,rounded", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    subgraph cluster_raw {
+        label="1. Raw Data & Annotation Loading";
+        style=dashed; color="#0288D1";
+        RawImages [label="326 Raw Images (1530x1530 px)\n5 Experimental Sessions", fillcolor="#E1F5FE"];
+        RawJSONs [label="326 LabelMe JSON Files\nLandmarks: mp, mh, ma, mlw, mrw, fp, fh, fa", fillcolor="#E1F5FE"];
+        Parser [label="cs229.annotation.Annotation\n(Coordinate scaling, sanity checks)", fillcolor="#B3E5FC"];
+
+        RawImages -> Parser;
+        RawJSONs -> Parser;
+    }
+
+    subgraph cluster_filtering {
+        label="2. Quality Filtering & Feature Generation";
+        style=dashed; color="#388E3C";
+        DS_FlyCount [label="FlyCount Dataset:\n1,012 samples (Class 0: 404, 1: 564, 2: 44)", fillcolor="#C8E6C9"];
+        DS_ID [label="Sex ID Dataset:\n564 samples (Class 0: 282, 1: 282)", fillcolor="#C8E6C9"];
+        Raw_MaleOrient [label="239 Valid Male Frames\n(Required: mp, mh, ma)", fillcolor="#DCEDC8"];
+        Raw_FemaleOrient [label="174 Valid Female Frames\n(Required: fp, fh, fa)", fillcolor="#DCEDC8"];
+        Raw_Wing [label="236 Valid Wing Frames\n(Required: mp, mh, ma, mlw, mrw)", fillcolor="#DCEDC8"];
+
+        Parser -> DS_FlyCount;
+        Parser -> DS_ID;
+        Parser -> Raw_MaleOrient;
+        Parser -> Raw_FemaleOrient;
+        Parser -> Raw_Wing;
+    }
+
+    subgraph cluster_augmentation {
+        label="3. Physical Invariance Augmentation";
+        style=dashed; color="#FBC02D";
+        Aug_MaleOrient [label="Male Orientation Dataset:\n478 samples (239 Normal + 239 Rot180)", fillcolor="#FFF9C4"];
+        Aug_FemaleOrient [label="Female Orientation Dataset:\n348 samples (174 Normal + 174 Rot180)", fillcolor="#FFF9C4"];
+        Aug_Wing [label="Male Wing Dataset:\n472 samples (236 Left + 236 Reflected Right)", fillcolor="#FFF9C4"];
+
+        Raw_MaleOrient -> Aug_MaleOrient [label="180 deg Rotation"];
+        Raw_FemaleOrient -> Aug_FemaleOrient [label="180 deg Rotation"];
+        Raw_Wing -> Aug_Wing [label="Bilateral Reflection"];
+    }
+
+    subgraph cluster_split {
+        label="4. Anti-Leakage Grouping (GroupShuffleSplit)";
+        style=dashed; color="#7B1FA2";
+        Grouping [label="Group ID Assignment:\ngroup_id = session_folder + frame_id", fillcolor="#E1BEE7"];
+        GroupSplit [label="GroupShuffleSplit (80% Train, 20% Test)\nPrevents correlated augmented pairs crossing boundary", fillcolor="#CE93D8"];
+        TrainSet [label="Training Set (80% Groups)\nFit Scaler, PCA, Models ONLY here", fillcolor="#BA68C8"];
+        TestSet [label="Held-Out Test Set (20% Groups)\nZero leakage evaluation", fillcolor="#BA68C8"];
+
+        DS_FlyCount -> Grouping;
+        DS_ID -> Grouping;
+        Aug_MaleOrient -> Grouping;
+        Aug_FemaleOrient -> Grouping;
+        Aug_Wing -> Grouping;
+
+        Grouping -> GroupSplit;
+        GroupSplit -> TrainSet [label="80%"];
+        GroupSplit -> TestSet [label="20%"];
+    }
+
+    subgraph cluster_training {
+        label="5. Artifact Serialization & Evaluation";
+        style=dashed; color="#E65100";
+        Model1 [label="clf_is_fly.joblib (1.7 KB)", fillcolor="#FFE0B2"];
+        Model2 [label="clf_id.joblib (1.5 KB)", fillcolor="#FFE0B2"];
+        Model3M [label="clf_orient_male.joblib (486 KB)", fillcolor="#FFE0B2"];
+        Model3F [label="clf_orient_female.joblib (486 KB)", fillcolor="#FFE0B2"];
+        Model4 [label="clf_wing.joblib (1.17 MB)", fillcolor="#FFE0B2"];
+        EvalJSON [label="evaluation_metrics.json", fillcolor="#FFCC80"];
+
+        TrainSet -> Model1;
+        TrainSet -> Model2;
+        TrainSet -> Model3M;
+        TrainSet -> Model3F;
+        TrainSet -> Model4;
+
+        TestSet -> EvalJSON;
+        Model1 -> EvalJSON;
+        Model2 -> EvalJSON;
+        Model3M -> EvalJSON;
+        Model3F -> EvalJSON;
+        Model4 -> EvalJSON;
+    }
+}
+

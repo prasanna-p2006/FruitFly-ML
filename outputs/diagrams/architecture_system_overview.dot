@@ -1,0 +1,92 @@
+digraph SystemArchitecture {
+    rankdir=TD;
+    node [shape=box, style="filled,rounded", fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    // Styles
+    node [fillcolor="#E1F5FE", color="#0288D1"] RawVideo, ValidatedFrame, OutVideo, OutCSV;
+    node [fillcolor="#E8F5E9", color="#388E3C"] Mask, Gray, ThresholdCore, ThresholdWings, Contours;
+    node [fillcolor="#FFF9C4", color="#FBC02D"] DecisionTree, StateDispatcher;
+    node [fillcolor="#F3E5F5", color="#7B1FA2"] SexID, MaleOrient, FemaleOrient, WingReg;
+    node [fillcolor="#FFECB3", color="#FFA000"] HUDOverlay, CSVLogger;
+
+    subgraph cluster_input {
+        label="1. Video Ingestion & Stream Stabilization";
+        style=dashed; color="#0288D1";
+        RawVideo [label="Input MP4 Video\n(test1 - test5.mp4)"];
+        VideoCapture [label="cv2.VideoCapture\n(Backend: CAP_MSMF @ 35 FPS)"];
+        DuplicateFilter [label="Duplicate Frame Filter\n(np.array_equal, max_diff == 0)"];
+        ValidatedFrame [label="Validated Frame\n(1530x1530 RGB @ 35.0 FPS)"];
+        
+        RawVideo -> VideoCapture -> DuplicateFilter -> ValidatedFrame;
+    }
+
+    subgraph cluster_preprocessing {
+        label="2. Computer Vision Preprocessing";
+        style=dashed; color="#388E3C";
+        Gray [label="Chamber Grayscale\n(frame[:, :, 0])"];
+        Mask [label="Circular Arena Mask\n(cv2.circle @ radius 680)"];
+        ThresholdCore [label="Adaptive Core Threshold\n(Fixed 115, THRESH_BINARY_INV)"];
+        ThresholdWings [label="Adaptive Wing Threshold\n(Median Blur 5, Mean ROI - 5)"];
+        Contours [label="Contour Extraction\n(cv2.findContours, RETR_EXTERNAL)"];
+
+        ValidatedFrame -> Gray;
+        ValidatedFrame -> Mask;
+        Gray -> ThresholdCore;
+        Mask -> ThresholdCore;
+        Gray -> ThresholdWings;
+        Mask -> ThresholdWings;
+        ThresholdCore -> Contours;
+    }
+
+    subgraph cluster_detection {
+        label="3. Fly Detection & Morphological Dispatch";
+        style=dashed; color="#FBC02D";
+        DecisionTree [label="Decision Tree Classifier\n(Split on Area: 1413.5, 10131.0)"];
+        StateDispatcher [shape=diamond, label="State Branch"];
+        StateOverlapping [label="OVERLAPPING_FLIES\n(Suppress Individual Pose)"];
+        StateSeparated [label="TWO_FLIES_SEPARATED\n(Extract Male/Female Patches)"];
+        StateSingle [label="SINGLE_FLY_DETECTED\n(Partial Telemetry)"];
+
+        Contours -> DecisionTree -> StateDispatcher;
+        StateDispatcher -> StateOverlapping [label="both >= 1"];
+        StateDispatcher -> StateSeparated [label="n_one == 2"];
+        StateDispatcher -> StateSingle [label="n_one == 1"];
+    }
+
+    subgraph cluster_models {
+        label="4. Machine Learning Inference Pipeline";
+        style=dashed; color="#7B1FA2";
+        SexID [label="Sex Identification (clf_id)\nStandardScaler + LogisticRegression\nFeatures: [Area1, Area2, Aspect1, Aspect2]"];
+        MaleOrient [label="Male Orientation (clf_orient_male)\nHOG (96x80) + PCA(15) + LogisticReg\nOutput: [0 deg, 360 deg) Heading"];
+        FemaleOrient [label="Female Orientation (clf_orient_female)\nHOG (96x80) + PCA(15) + LogisticReg\nOutput: [0 deg, 360 deg) Heading"];
+        WingReg [label="Male Wing Regression (clf_wing)\nBilateral Reflection + HOG + PCA(40) + LinearReg\nOutput: Left & Right Wing Angles (deg)"];
+
+        StateSeparated -> SexID;
+        SexID -> MaleOrient [label="Male Patch"];
+        SexID -> FemaleOrient [label="Female Patch"];
+        SexID -> WingReg [label="Male Centered Patch"];
+    }
+
+    subgraph cluster_output {
+        label="5. Visualization & Telemetry Output";
+        style=dashed; color="#FFA000";
+        HUDOverlay [label="Visual HUD Engine\nDraw: Contours, Vectors, Markers, Text"];
+        CSVLogger [label="Telemetry Logger\n10-Column CSV Stream"];
+        OutVideo [label="Annotated Video\n(outputs/videos/*_annotated.mp4)"];
+        OutCSV [label="Trajectory CSV\n(outputs/videos/*_trajectory.csv)"];
+
+        MaleOrient -> HUDOverlay;
+        FemaleOrient -> HUDOverlay;
+        WingReg -> HUDOverlay;
+        StateOverlapping -> HUDOverlay;
+        HUDOverlay -> OutVideo;
+
+        MaleOrient -> CSVLogger;
+        FemaleOrient -> CSVLogger;
+        WingReg -> CSVLogger;
+        StateOverlapping -> CSVLogger;
+        CSVLogger -> OutCSV;
+    }
+}
+

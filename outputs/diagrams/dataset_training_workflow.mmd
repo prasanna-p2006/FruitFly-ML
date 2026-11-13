@@ -1,0 +1,42 @@
+flowchart TD
+    subgraph RAW ["1. Raw Data Collection & Annotation"]
+        IMAGES["326 Raw High-Resolution Frames\n(1530x1530 px, 5 Recording Sessions)"]
+        JSONS["326 LabelMe JSON Annotations\nLandmarks: mp, mh, ma, mlw, mrw, fp, fh, fa"]
+        IMAGES & JSONS --> PARSER[cs229.annotation.Annotation]
+    end
+
+    subgraph FILTER ["2. Landmark Quality Filtering & Verification"]
+        PARSER --> CHK{check_features}
+        CHK -->|"FlyCount Contours"| DS_ISFLY["1,012 Chamber & Contour Samples\n(Class 0: 404, Class 1: 564, Class 2: 44)"]
+        CHK -->|"Valid Fly Pairs (Area & Aspect)"| DS_ID["564 Pair Permutation Samples\n(Class 0: 282, Class 1: 282)"]
+        CHK -->|"Valid Male Heading (mp, mh, ma)"| RAW_M_ORIENT["239 Raw Male Frames"]
+        CHK -->|"Valid Female Heading (fp, fh, fa)"| RAW_F_ORIENT["174 Raw Female Frames"]
+        CHK -->|"Valid Wing Landmarks (mp, mh, ma, mlw, mrw)"| RAW_WING["236 Raw Wing Frames"]
+    end
+
+    subgraph AUGMENT ["3. Physical Invariant Data Augmentation"]
+        RAW_M_ORIENT -->|180 deg Rotation Augmentation| DS_MORIENT["478 Male Heading Samples\n(239 Normal + 239 Flipped)"]
+        RAW_F_ORIENT -->|180 deg Rotation Augmentation| DS_FORIENT["348 Female Heading Samples\n(174 Normal + 174 Flipped)"]
+        RAW_WING -->|Bilateral Symmetry Reflection| DS_WING["472 Male Wing Samples\n(236 Left + 236 Reflected Right)"]
+    end
+
+    subgraph ANTILEAK ["4. Zero Data Leakage Grouping (GroupShuffleSplit)"]
+        DS_ISFLY & DS_ID & DS_MORIENT & DS_FORIENT & DS_WING --> GROUPS["Group Assignment by Source Frame:\ngroup_id = folder_name + frame_id"]
+        GROUPS --> GSS["sklearn.model_selection.GroupShuffleSplit\n(test_size=0.20, random_state=42)"]
+        GSS -->|"Guarantees frame variants NEVER cross train/test barrier"| SPLITS
+        
+        subgraph SPLITS ["Isolated Train/Test Splits"]
+            TRAIN["80% Training Groups\nFit: Scalers, PCA, Classifiers"]
+            TEST["20% Held-Out Test Groups\nStrict Transform & Evaluation Only"]
+        end
+    end
+
+    subgraph FIT ["5. Artifact Serialization into models/"]
+        TRAIN --> FIT_DT["Fit Decision Tree -> clf_is_fly.joblib"]
+        TRAIN --> FIT_ID["Fit Scaler + LogReg -> clf_id.joblib"]
+        TRAIN --> FIT_MO["Fit PCA(15) + LogReg -> clf_orient_male.joblib"]
+        TRAIN --> FIT_FO["Fit PCA(15) + LogReg -> clf_orient_female.joblib"]
+        TRAIN --> FIT_W["Fit PCA(40) + OLS -> clf_wing.joblib"]
+        TEST --> EVAL_REPORT["evaluation_metrics.json & test_predictions.joblib"]
+    end
+

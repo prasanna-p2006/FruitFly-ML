@@ -1,0 +1,43 @@
+flowchart LR
+    subgraph MODEL1 ["Model 1: Fly Counting (Decision Tree)"]
+        direction TB
+        M1_IN["Contour Boundary C"] --> M1_AREA["Contour Area A = cv2.contourArea(C)"]
+        M1_AREA --> M1_TREE{"Decision Tree\nEntropy, Depth=2"}
+        M1_TREE -->|"A <= 1,413.5"| M1_C0["Class 0: neither\n(Noise / Chamber Artifact)"]
+        M1_TREE -->|"1,413.5 < A <= 10,131.0"| M1_C1["Class 1: one\n(Individual Fly)"]
+        M1_TREE -->|"A > 10,131.0"| M1_C2["Class 2: both\n(Touching / Overlapping Flies)"]
+    end
+
+    subgraph MODEL2 ["Model 2: Sex Identification (Logistic Regression)"]
+        direction TB
+        M2_IN["Two Classified One-Fly Contours (c1, c2)"] --> M2_MOM["Normalized Image Moments\nmu20, mu02, mu11"]
+        M2_MOM --> M2_FEAT["Feature Vector X in R^4:\n[Area1, Area2, Aspect1, Aspect2]"]
+        M2_FEAT --> M2_SCALER["StandardScaler\nz = (X - mu) / sigma"]
+        M2_SCALER --> M2_LOGREG["Logistic Regression\nP(y=1) = sigma(w^T z + b)"]
+        M2_LOGREG -->|"y=0"| M2_OUT0["[Male=Fly1, Female=Fly2]"]
+        M2_LOGREG -->|"y=1"| M2_OUT1["[Female=Fly1, Male=Fly2]"]
+    end
+
+    subgraph MODEL3 ["Model 3: Heading Orientation (PCA + Logistic Regression)"]
+        direction TB
+        M3_IN["Isolated Fly Patch"] --> M3_AXIS["Moments-Based Alignment:\ntheta_axis = 0.5 * arctan2(2*mu11, mu20 - mu02)\nAmbiguity: theta vs theta + pi"]
+        M3_AXIS --> M3_CROP["Centered Crop 192x160\nDownsample x2 -> 96x80"]
+        M3_CROP --> M3_HOG["HOG Descriptor:\nCells 8x8, Blocks 16x16, 9 Bins\nFeature Dim: 3,780"]
+        M3_HOG --> M3_PCA["PCA Projection (k=15):\nRetains > 60% Variance"]
+        M3_PCA --> M3_CLF{"Trained Classifier\n(Dedicated Male/Female)"}
+        M3_CLF -->|"clf_orient_male"| M3_MOUT["Male Heading: [0, 360) deg"]
+        M3_CLF -->|"clf_orient_female"| M3_FOUT["Female Heading: [0, 360) deg"]
+    end
+
+    subgraph MODEL4 ["Model 4: Male Wing-Angle Regression (Bilateral PCA + Linear Regression)"]
+        direction TB
+        M4_IN["Male Fly Body Patch (400x400)"] --> M4_ALIGN["Rotate Vertical along Body Heading"]
+        M4_ALIGN --> M4_SPLIT["Extract Left & Right Wing Regions"]
+        M4_SPLIT -->|"Left Wing"| M4_LW["Raw Left Patch"]
+        M4_SPLIT -->|"Right Wing"| M4_RW["Horizontally Reflected Patch\n(Bilateral Symmetry)"]
+        M4_LW & M4_RW --> M4_HOG["HOG Descriptor (96x80)\nFeature Dim: 3,564"]
+        M4_HOG --> M4_PCA["PCA Projection (k=40):\nRetains > 75% Variance"]
+        M4_PCA --> M4_OLS["Linear Regression (OLS):\ntheta = w^T * z_pca + b"]
+        M4_OLS --> M4_OUT["Predicted Left & Right Wing Angles (deg)\nTheoretical Range: [0 deg, 90 deg)"]
+    end
+

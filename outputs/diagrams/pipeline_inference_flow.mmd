@@ -1,0 +1,45 @@
+flowchart TD
+    START([Start Video Inference]) --> INIT[Initialize Capture: cv2.CAP_MSMF\nRead Video Dimensions & 35.0 FPS\nInitialize VideoWriter & Trajectory CSV]
+    INIT --> LOOP_START[Read Next Frame: cap.read]
+
+    LOOP_START --> OK_CHK{Frame Read OK?}
+    OK_CHK -->|No / End of Stream| CLEANUP[Release Capture & VideoWriter\nFlush and Close CSV File\nCompute Final Performance Benchmarks]
+    CLEANUP --> DONE([Inference Complete])
+
+    OK_CHK -->|Yes| DUP_CHK{np.array_equal with prev_frame?}
+    DUP_CHK -->|Yes: Duplicate Artifact| INC_DUP[Increment skipped_duplicates] --> LOOP_START
+    DUP_CHK -->|No: Valid New Frame| CACHE_PREV[Update prev_raw_frame\nIncrement processed_count\nCompute timestamp: i-1 / 35.0]
+
+    CACHE_PREV --> MASK_CHK{Circular Mask Cached?}
+    MASK_CHK -->|No| GEN_MASK[Generate Arena Mask: img_to_mask] --> SEG
+    MASK_CHK -->|Yes| SEG[Extract Core Contours:\nfind_contours core, fixed thresh 115]
+
+    SEG --> CLF_CONTOURS[FlyCount Decision Tree:\nClassify each contour into neither / one / both]
+    CLF_CONTOURS --> STATE_DISPATCH{Dispatch Logic}
+
+    STATE_DISPATCH -->|"len(one) == 2\n(Two Separated Flies)"| STATE_SEP[State: TWO_FLIES_SEPARATED]
+    STATE_DISPATCH -->|"len(both) >= 1\n(Touching / Mating)"| STATE_OVR[State: OVERLAPPING_FLIES]
+    STATE_DISPATCH -->|"len(one) == 1\n(Single Fly Visible)"| STATE_SNG[State: SINGLE_FLY_DETECTED]
+    STATE_DISPATCH -->|"len(one)==0 and len(both)==0"| STATE_NON[State: NO_FLIES_DETECTED]
+
+    subgraph SEPARATED_PIPELINE ["Two Separated Flies Processing"]
+        STATE_SEP --> SEX_ID[Classify Sex: clf_id\nSort into Male & Female Entities]
+        SEX_ID --> ORIENT[Estimate Headings: clf_orient_male & clf_orient_female\nCompute 360 deg Heading Vectors]
+        ORIENT --> WINGS[Estimate Courtship Display: clf_wing\nCompute Left & Right Male Wing Angles]
+        WINGS --> RENDER_SEP[Render Full Overlay:\nCyan Male, Magenta Female, Yellow Wings, Head/Abdomen Dots]
+        RENDER_SEP --> WRITE_CSV_SEP[Write Full 10-Column CSV Row]
+    end
+
+    subgraph OVERLAP_PIPELINE ["Overlapping State Processing"]
+        STATE_OVR --> RENDER_OVR[Render Amber Boundary & CONTACT / OVERLAP Label]
+        RENDER_OVR --> WRITE_CSV_OVR[Write CSV Row with Null / Blank Angles\n(Prevents Data Fabrication)]
+    end
+
+    subgraph PARTIAL_PIPELINE ["Fallback State Processing"]
+        STATE_SNG & STATE_NON --> RENDER_FALLBACK[Render Warning HUD]
+        RENDER_FALLBACK --> WRITE_CSV_FALLBACK[Write Partial / Null CSV Row]
+    end
+
+    WRITE_CSV_SEP & WRITE_CSV_OVR & WRITE_CSV_FALLBACK --> WRITE_FRAME[Write Frame to MP4 VideoWriter]
+    WRITE_FRAME --> LOOP_START
+
